@@ -1,6 +1,4 @@
 import cv2
-from imutils.video import VideoStream
-import imutils
 import threading
 import serial
 
@@ -16,50 +14,57 @@ GREEN_BOX_RGB = (0, 255, 0)
 RESOLUTION_SCALE = 1
 MIN_DISTANCE = 50
 EYE_CASCADE_CLASSIFIER = 'haarcascade_righteye_2splits.xml'
-global frameSet
-frameSet = set()
-global frameCounter
-frameCounter=0
+BAUD_RATE = 9600
+SERIAL_PORT = "/dev/ttyACM0"
 # value to be passed into Canny() higher values means less edges will be detected
 EDGE_STRICTNESS = 52
 # higher values means an object must have more edges to shape it like a circle to be considered a circle
 CIRCLE_STRICTNESS = 16
+LEFT = 0
+CENTRE_OFFSET = 1
+RIGHT = 2
+
+global frameSet
+global frameCounter
+frameSet = set()
+frameCounter = 0
 
 eye_cascade = cv2.CascadeClassifier(EYE_CASCADE_CLASSIFIER)
+ser = serial.Serial(SERIAL_PORT, BAUD_RATE)
 
-ser = serial.Serial("/dev/ttyACM0", 9600)
+cap0 = cv2.VideoCapture(0)
+cap1 = cv2.VideoCapture(1)
 
-#cap0 = cv2.VideoCapture(0) #VideoStream(src=0).start() # 0 defaults to the standard webcam
-cap1 = cv2.VideoCapture(1) #VideoStream(src=1).start()
 
 def messagePasser(sector):
-    #frameSet is global
     global frameSet
     global frameCounter
     mutex.acquire()
     frameCounter += 1
-    if frameCounter%10 == 0:
-            #send information to raspi (a set)
-            #redefine frame set
-            for i in frameSet: 
-                ser.write(bytes(str(i).encode(
-				'utf-8')))
-                print('sending {}'.format(i))
-            ser.write(b'9')
-            frameSet = set()
+    if frameCounter % 10 == 0:
+        # send information to arduino
+        # redefine frame set
+        for i in frameSet:
+            ser.write(bytes(str(i).encode('utf-8')))
+            print('sending {}'.format(i), end=" ")
+        ser.write(b'9')
+        frameSet = set()
     else:
         frameSet.add(sector)
         for i in frameSet:
             print(i, end=" ")
     mutex.release()
-						
+
+
 class camThread(threading.Thread):
     def __init__(self, cap, ID):
         threading.Thread.__init__(self)
         self.cap = cap
         self.ID = ID
+
     def run(self):
         driver(self.cap, self.ID)
+
 
 def driver(cap, ID):
     global frameCounter
@@ -67,8 +72,6 @@ def driver(cap, ID):
         ret, frame = cap.read()
         if ret is False:
             break
-
-        #window = set()
 
         for i in range(1):
 
@@ -80,45 +83,44 @@ def driver(cap, ID):
             _, bthreshold = cv2.threshold(blurg_roi, LOWER_BRIGHTNESS_THRESHOLD, 255, cv2.THRESH_BINARY_INV)
 
             # RETR_TREE calculates full hierarchy of the contours for nested object detection
-            _,  contours, _ = cv2.findContours(bthreshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            _, contours, _ = cv2.findContours(bthreshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
             contours = sorted(contours, key=lambda x: cv2.contourArea(x), reverse=True)
             eyes = eye_cascade.detectMultiScale(blurg_roi)
 
             for eye in eyes:
                 (x, y, w, h) = eye
-                lrc = (x * 3)//(XEND - XSTART)
+                lrc = (x * 3) // (XEND - XSTART)
                 if ID == 0:
-			        #2/3 of left needs to be 0
-                    lrc //=2
+                    # From left, 2/3 of ID0's frame needs to be LEFT, 1/3 is CENTER
+                    lrc //= 2
                 else:
-                    if lrc==0:
-                        lrc += 1
+                    # From left, 1/3 OF ID1's frame needs to be center, 2/3 is RIGHT
+                    if lrc == LEFT:
+                        lrc += CENTRE_OFFSET
                     else:
-                        lrc = 2	
+                        lrc = RIGHT
 
-                #window.add(lrc)
                 messagePasser(lrc)
                 print('eye x:{} w:{} cameraID: {}'.format(x, w, str(ID)))
-                cv2.rectangle(roi, (x, y), (x + w, y + h), GREEN_BOX_RGB , 2)
-                roi_gray2 = blurg_roi[y : y + h, x : x + w]
+                cv2.rectangle(roi, (x, y), (x + w, y + h), GREEN_BOX_RGB, 2)
+                roi_gray2 = blurg_roi[y: y + h, x: x + w]
                 roi_color2 = roi[y: y + h, x: x + w]
                 circles = cv2.HoughCircles(roi_gray2, cv2.HOUGH_GRADIENT, RESOLUTION_SCALE, MIN_DISTANCE,
-                                       param1=EDGE_STRICTNESS, param2=CIRCLE_STRICTNESS, minRadius=0, maxRadius=0)
+                                           param1=EDGE_STRICTNESS, param2=CIRCLE_STRICTNESS, minRadius=0, maxRadius=0)
 
-            #cv2.imshow("roi_{}".format(cap), roi)
-            #cv2.imshow("btresh_{}".format(cap), bthreshold)
+            # cv2.imshow("roi_{}".format(cap), roi)
+            # cv2.imshow("bthresh_{}".format(cap), bthreshold)
             key = cv2.waitKey(100)
             if key == 27:
                 cap.release()
                 break
-            #for i in window:
-            #print("window content: {}".format(i))
 
-#run
-#thread0 = camThread(cap0, 0)
+
+# run
+thread0 = camThread(cap0, 0)
 thread1 = camThread(cap1, 1)
-#thread0.start()
+thread0.start()
 thread1.start()
 
 cv2.destroyAllWindows()
