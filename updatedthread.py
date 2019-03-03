@@ -1,8 +1,10 @@
+
 import cv2
 from imutils.video import VideoStream
 import imutils
 import threading
 
+mutex = threading.Semaphore()
 XSTART = 100
 XEND = 400
 YSTART = 250
@@ -32,23 +34,27 @@ def messagePasser(sector):
     #frameSet is global
     global frameSet
     global frameCounter
+    mutex.acquire()
+    frameCounter += 1
     if frameCounter%20 == 0:
-            #send information to raspi
+            #send information to raspi (a set)
             #redefine frame set
             frameSet = set()
     else:
         frameSet.add(sector)
         for i in frameSet:
-            print(i, end=" ")			
+            print(i, end=" ")
+    mutex.release()
+						
 class camThread(threading.Thread):
-    def __init__(self, cap, name):
+    def __init__(self, cap, ID):
         threading.Thread.__init__(self)
         self.cap = cap
-        self.name = name
+        self.ID = ID
     def run(self):
-        driver(self.cap, self.name)
+        driver(self.cap, self.ID)
 
-def driver(cap, name):
+def driver(cap, ID):
     global frameCounter
     while True:
         ret, frame = cap.read()
@@ -75,10 +81,18 @@ def driver(cap, name):
             for eye in eyes:
                 (x, y, w, h) = eye
                 lrc = (x * 3)//(XEND - XSTART)
+                if ID == 0:
+			        #2/3 of left needs to be 0
+                    lrc //=2
+                else:
+                    if lrc==0:
+                        lrc += 1
+                    else:
+                        lrc = 2	
+
                 #window.add(lrc)
                 messagePasser(lrc)
-                frameCounter += 1
-                print('eye x:{} w:{} {}'.format(x, w, str(name)))
+                print('eye x:{} w:{} cameraID: {}'.format(x, w, str(ID)))
                 cv2.rectangle(roi, (x, y), (x + w, y + h), GREEN_BOX_RGB , 2)
                 roi_gray2 = blurg_roi[y : y + h, x : x + w]
                 roi_color2 = roi[y: y + h, x: x + w]
@@ -87,7 +101,7 @@ def driver(cap, name):
 
             #cv2.imshow("roi_{}".format(cap), roi)
             #cv2.imshow("btresh_{}".format(cap), bthreshold)
-            key = cv2.waitKey(3000)
+            key = cv2.waitKey(100)
             if key == 27:
                 cap.release()
                 break
@@ -95,10 +109,9 @@ def driver(cap, name):
             #print("window content: {}".format(i))
 
 #run
-thread0 = camThread(cap0, "good cam")
-thread1 = camThread(cap1, "bad cam")
+thread0 = camThread(cap0, 0)
+thread1 = camThread(cap1, 1)
 thread0.start()
 thread1.start()
 
 cv2.destroyAllWindows()
-
