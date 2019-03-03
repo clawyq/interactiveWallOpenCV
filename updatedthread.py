@@ -1,8 +1,8 @@
-
 import cv2
 from imutils.video import VideoStream
 import imutils
 import threading
+import serial
 
 mutex = threading.Semaphore()
 XSTART = 100
@@ -27,7 +27,9 @@ CIRCLE_STRICTNESS = 16
 
 eye_cascade = cv2.CascadeClassifier(EYE_CASCADE_CLASSIFIER)
 
-cap0 = cv2.VideoCapture(0) #VideoStream(src=0).start() # 0 defaults to the standard webcam
+ser = serial.Serial("/dev/ttyACM0", 9600)
+
+#cap0 = cv2.VideoCapture(0) #VideoStream(src=0).start() # 0 defaults to the standard webcam
 cap1 = cv2.VideoCapture(1) #VideoStream(src=1).start()
 
 def messagePasser(sector):
@@ -36,9 +38,14 @@ def messagePasser(sector):
     global frameCounter
     mutex.acquire()
     frameCounter += 1
-    if frameCounter%20 == 0:
+    if frameCounter%10 == 0:
             #send information to raspi (a set)
             #redefine frame set
+            for i in frameSet: 
+                ser.write(bytes(str(i).encode(
+				'utf-8')))
+                print('sending {}'.format(i))
+            ser.write(b'9')
             frameSet = set()
     else:
         frameSet.add(sector)
@@ -109,9 +116,9 @@ def driver(cap, ID):
             #print("window content: {}".format(i))
 
 #run
-thread0 = camThread(cap0, 0)
+#thread0 = camThread(cap0, 0)
 thread1 = camThread(cap1, 1)
-thread0.start()
+#thread0.start()
 thread1.start()
 
 cv2.destroyAllWindows()
